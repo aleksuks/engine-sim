@@ -85,6 +85,10 @@ class CombustionChamber : public atg_scs::ForceGenerator {
         FlameEvent m_flameEvent;
         bool m_lit;
 
+        // Set when a diesel injection lights off (amplitude of the knock), read
+        // and cleared by the simulator for the injector clatter sound
+        double m_knockEvent;
+
         FrictionModelParams m_frictionModel;
 
         double m_peakTemperature;

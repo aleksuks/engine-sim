@@ -34,6 +34,7 @@ class RightGaugeCluster : public UiElement {
         double getRedline() const;
         double getSpeed() const;
         double getManifoldPressure() const;
+        double getBoostCeiling() const;
 
     protected:
         Engine *m_engine;

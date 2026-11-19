@@ -61,6 +61,9 @@ public node fuel => __engine_sim__fuel {
     input low_efficiency_attenuation [float]: 0.6;
     input max_turbulence_effect [float]: 2.0;
     input max_dilution_effect [float]: 10.0;
+    input max_lambda [float]: 1.9;
+    input compression_ignition [bool]: false;
+    input autoignition_temperature [float]: 0.0;
     alias output __out [fuel_channel];
 }
 
@@ -492,6 +495,22 @@ public node intake_parameters {
     input runner_length: 4.0 * units.inch;
     input runner_flow_rate: k_carb(200.0);
     input velocity_decay: 0.25;
+    input turbo: false;
+    input turbo_max_boost: 1.0 * units.bar;
+    input turbo_spool_time: 0.8;
+    input turbo_full_boost_rpm: 2500 * units.rpm;
+    input turbo_max_shaft_rpm: 160000.0;
+    input blow_off_valve: true;
+    input whistle_volume: 1.0;
+    input whistle_min_frequency: 1200.0;
+    input whistle_max_frequency: 7500.0;
+    input blow_off_volume: 1.0;
+    input diesel: false;
+    input diesel_idle_fuel: 0.0;
+    input diesel_idle_rpm: 800 * units.rpm;
+    input diesel_governor_gain: 3.0;
+    input injector_sound: impulse_response(filename: "", volume: 0.0);
+    input diesel_max_fuel: 0.85;
 }
 
 private node _intake => __engine_sim__intake {
@@ -505,6 +524,22 @@ private node _intake => __engine_sim__intake {
     input throttle_gamma [float];
     input runner_length [float];
     input velocity_decay [float];
+    input turbo [bool];
+    input turbo_max_boost [float];
+    input turbo_spool_time [float];
+    input turbo_full_boost_rpm [float];
+    input turbo_max_shaft_rpm [float];
+    input blow_off_valve [bool];
+    input whistle_volume [float];
+    input whistle_min_frequency [float];
+    input whistle_max_frequency [float];
+    input blow_off_volume [float];
+    input diesel [bool];
+    input diesel_idle_fuel [float];
+    input diesel_max_fuel [float];
+    input diesel_idle_rpm [float];
+    input diesel_governor_gain [float];
+    input injector_sound [impulse_response_channel];
     alias output __out [intake_channel];
 }
 
@@ -520,6 +555,22 @@ public node intake {
     input throttle_gamma: parameters.throttle_gamma;
     input runner_length: parameters.runner_length;
     input velocity_decay: parameters.velocity_decay;
+    input turbo: parameters.turbo;
+    input turbo_max_boost: parameters.turbo_max_boost;
+    input turbo_spool_time: parameters.turbo_spool_time;
+    input turbo_full_boost_rpm: parameters.turbo_full_boost_rpm;
+    input turbo_max_shaft_rpm: parameters.turbo_max_shaft_rpm;
+    input blow_off_valve: parameters.blow_off_valve;
+    input whistle_volume: parameters.whistle_volume;
+    input whistle_min_frequency: parameters.whistle_min_frequency;
+    input whistle_max_frequency: parameters.whistle_max_frequency;
+    input blow_off_volume: parameters.blow_off_volume;
+    input diesel: parameters.diesel;
+    input diesel_idle_fuel: parameters.diesel_idle_fuel;
+    input diesel_max_fuel: parameters.diesel_max_fuel;
+    input diesel_idle_rpm: parameters.diesel_idle_rpm;
+    input diesel_governor_gain: parameters.diesel_governor_gain;
+    input injector_sound: parameters.injector_sound;
     alias output __out [_intake]:
         _intake(
             plenum_volume: plenum_volume,
@@ -531,7 +582,23 @@ public node intake {
             idle_throttle_plate_position: idle_throttle_plate_position,
             throttle_gamma: throttle_gamma,
             runner_length: runner_length,
-            velocity_decay: velocity_decay
+            velocity_decay: velocity_decay,
+            turbo: turbo,
+            turbo_max_boost: turbo_max_boost,
+            turbo_spool_time: turbo_spool_time,
+            turbo_full_boost_rpm: turbo_full_boost_rpm,
+            turbo_max_shaft_rpm: turbo_max_shaft_rpm,
+            blow_off_valve: blow_off_valve,
+            whistle_volume: whistle_volume,
+            whistle_min_frequency: whistle_min_frequency,
+            whistle_max_frequency: whistle_max_frequency,
+            blow_off_volume: blow_off_volume,
+            diesel: diesel,
+            diesel_idle_fuel: diesel_idle_fuel,
+            diesel_max_fuel: diesel_max_fuel,
+            diesel_idle_rpm: diesel_idle_rpm,
+            diesel_governor_gain: diesel_governor_gain,
+            injector_sound: injector_sound
         );
 }
 

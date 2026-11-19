@@ -506,6 +506,26 @@ void EngineSimApplication::loadEngine(
         waveFile.DestroyInternalBuffer();
     }
 
+
+    for (int i = 0; i < engine->getIntakeCount(); ++i) {
+        ImpulseResponse *clack = engine->getIntake(i)->getInjectorSound();
+        if (clack == nullptr || clack->getVolume() <= 0) continue;
+
+        ysWindowsAudioWaveFile waveFile;
+        if (waveFile.OpenFile(clack->getFilename().c_str()) != ysAudioFile::Error::None) continue;
+        waveFile.InitializeInternalBuffer(waveFile.GetSampleCount());
+        waveFile.FillBuffer(0);
+        waveFile.CloseFile();
+
+        m_simulator->synthesizer().initializeClackSample(
+            reinterpret_cast<const int16_t *>(waveFile.GetBuffer()),
+            waveFile.GetSampleCount(),
+            static_cast<float>(clack->getVolume()));
+
+        waveFile.DestroyInternalBuffer();
+        break;
+    }
+
     m_simulator->startAudioRenderingThread();
 }
 
@@ -783,6 +803,12 @@ void EngineSimApplication::processEngineInput() {
     }
     else if (m_engine.IsKeyDown(ysKey::Code::E)) {
         m_targetSpeedSetting = 0.2;
+    }
+    else if (m_engine.IsKeyDown(ysKey::Code::O)) {
+        m_targetSpeedSetting = 0.5;
+    }
+    else if (m_engine.IsKeyDown(ysKey::Code::P)) {
+        m_targetSpeedSetting = 0.75;
     }
     else if (m_engine.IsKeyDown(ysKey::Code::R)) {
         m_targetSpeedSetting = 1.0;

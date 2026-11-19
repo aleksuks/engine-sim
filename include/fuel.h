@@ -24,6 +24,16 @@ class Fuel {
             double maxTurbulenceEffect = 2.0;
             double maxDilutionEffect = 50.0;
             Function *turbulenceToFlameSpeedRatio = nullptr;
+
+            // Leanest mixture (lambda) that will still burn
+            double maxLambda = 1.9;
+
+            // Compression ignition (diesel). When enabled, the charge only
+            // ignites if it has been compressed above the autoignition
+            // temperature, and burns like a diffusion flame (rate doesn't
+            // collapse at very lean overall mixtures).
+            bool compressionIgnition = false;
+            double autoignitionTemperature = 0.0;
         };
 
         Fuel();
@@ -50,6 +60,9 @@ class Fuel {
         virtual double laminarBurningVelocity(double molecularAfr, double T, double P) const;
 
         double getMolecularAfr() const { return m_molecularAfr; }
+        double getMaxLambda() const { return m_maxLambda; }
+        bool isCompressionIgnition() const { return m_compressionIgnition; }
+        double getAutoignitionTemperature() const { return m_autoignitionTemperature; }
 
     protected:
         std::string m_name;
@@ -62,6 +75,9 @@ class Fuel {
         double m_lowEfficiencyAttenuation;
         double m_maxTurbulenceEffect;
         double m_maxDilutionEffect;
+        double m_maxLambda;
+        bool m_compressionIgnition;
+        double m_autoignitionTemperature;
 
         Function *m_turbulenceToFlameSpeedRatio;
 };

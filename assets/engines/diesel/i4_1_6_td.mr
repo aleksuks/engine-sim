@@ -1,0 +1,404 @@
+// 1.6L Turbo-Diesel Inline-4 (8v SOHC-style, ~105 hp / ~250 Nm target)
+//
+// Uses the diesel + turbocharger support added in this fork:
+//   - Compression ignition: fuel only lights off once the charge has been
+//     compressed past the autoignition temperature (16.5:1 compression)
+//   - Unthrottled intake: the accelerator controls fuel quantity, not air
+//   - Turbocharger with spool lag, wastegate-limited boost and a whistle
+//     that rises in pitch with shaft speed
+//   - Low redline, heavy flywheel, rough/clattery sound settings
+
+import "engine_sim.mr"
+
+units units()
+constants constants()
+impulse_response_library ir_lib()
+
+label cycle(2 * 360 * units.deg)
+
+// Turbo settings
+label TURBO_BOOST(1.1 * units.bar)       // wastegate setting
+label TURBO_SPOOL_TIME(0.9)              // seconds, higher = more lag
+label TURBO_FULL_BOOST_RPM(2000)         // rpm where full boost arrives at full load
+label WHISTLE_VOLUME(1.0)                // 0 = silent, 2 = loud
+label INJECTOR_CLATTER_VOLUME(1.0)       // injector/knock clatter, 0 = off
+
+private node wires {
+    output wire1: ignition_wire();
+    output wire2: ignition_wire();
+    output wire3: ignition_wire();
+    output wire4: ignition_wire();
+}
+
+// Diesel knock: very fast, near-instant burn gives a sharp pressure
+// spike each cycle = the "clatter". Default gasoline curve is ~1.5x
+// turbulence with a 3.0 floor; this is ~3x with a high floor so the burn
+// is fast even at idle (where diesel clatter is loudest).
+// Raise DIESEL_KNOCK for more clatter, lower for smoother.
+label DIESEL_KNOCK(3.0)
+
+private node diesel_flame_speed {
+    input k: DIESEL_KNOCK;
+    alias output __out:
+        function(5.0)
+            .add_sample(0.0, 4.0 * k)
+            .add_sample(5.0, k * 5.0 + 4.0 * k)
+            .add_sample(10.0, k * 10.0 + 4.0 * k)
+            .add_sample(15.0, k * 15.0 + 4.0 * k)
+            .add_sample(20.0, k * 20.0 + 4.0 * k)
+            .add_sample(25.0, k * 25.0 + 4.0 * k)
+            .add_sample(30.0, k * 30.0 + 4.0 * k)
+            .add_sample(35.0, k * 35.0 + 4.0 * k)
+            .add_sample(40.0, k * 40.0 + 4.0 * k)
+            .add_sample(45.0, k * 45.0 + 4.0 * k);
+}
+
+public node diesel_fuel {
+    alias output __out:
+        fuel(
+            name: "Diesel",
+            molecular_mass: 170 * units.g,
+            energy_density: 42.6 * units.kJ / units.g,
+            density: 0.832 * units.kg / units.L,
+            molecular_afr: 17.75,
+            turbulence_to_flame_speed_ratio: diesel_flame_speed(),
+            max_burning_efficiency: 0.9,
+            burning_efficiency_randomness: 0.45,  // uneven cylinder-to-cylinder hits
+            low_efficiency_attenuation: 0.7,
+            max_turbulence_effect: 5.0,
+            max_dilution_effect: 8.0,
+            max_lambda: 12.0,                    // diesels idle extremely lean
+            compression_ignition: true,
+            autoignition_temperature: 550 * units.K
+        );
+}
+
+private node add_flow_sample {
+    input lift;
+    input flow;
+    input this;
+    alias output __out: this;
+
+    this.add_sample(lift * units.mm, k_28inH2O(flow))
+}
+
+public node td16_head {
+    input intake_camshaft;
+    input exhaust_camshaft;
+    // 399.6 cc swept / 15.5 = 25.8 cc -> 16.5:1 compression
+    input chamber_volume: 25.8 * units.cc;
+    input flip_display: false;
+    input flow_attenuation: 1.0;
+    input lift_scale: 1.0;
+    alias output __out: head;
+
+    function intake_flow(1 * units.mm)
+    intake_flow
+        .add_flow_sample(0 * lift_scale, 0 * flow_attenuation)
+        .add_flow_sample(1 * lift_scale, 30 * flow_attenuation)
+        .add_flow_sample(2 * lift_scale, 55 * flow_attenuation)
+        .add_flow_sample(3 * lift_scale, 80 * flow_attenuation)
+        .add_flow_sample(4 * lift_scale, 105 * flow_attenuation)
+        .add_flow_sample(5 * lift_scale, 125 * flow_attenuation)
+        .add_flow_sample(6 * lift_scale, 140 * flow_attenuation)
+        .add_flow_sample(7 * lift_scale, 150 * flow_attenuation)
+        .add_flow_sample(8 * lift_scale, 155 * flow_attenuation)
+        .add_flow_sample(9 * lift_scale, 158 * flow_attenuation)
+        .add_flow_sample(10 * lift_scale, 160 * flow_attenuation)
+
+    function exhaust_flow(1 * units.mm)
+    exhaust_flow
+        .add_flow_sample(0 * lift_scale, 0 * flow_attenuation)
+        .add_flow_sample(1 * lift_scale, 25 * flow_attenuation)
+        .add_flow_sample(2 * lift_scale, 45 * flow_attenuation)
+        .add_flow_sample(3 * lift_scale, 65 * flow_attenuation)
+        .add_flow_sample(4 * lift_scale, 85 * flow_attenuation)
+        .add_flow_sample(5 * lift_scale, 100 * flow_attenuation)
+        .add_flow_sample(6 * lift_scale, 110 * flow_attenuation)
+        .add_flow_sample(7 * lift_scale, 118 * flow_attenuation)
+        .add_flow_sample(8 * lift_scale, 122 * flow_attenuation)
+        .add_flow_sample(9 * lift_scale, 124 * flow_attenuation)
+        .add_flow_sample(10 * lift_scale, 125 * flow_attenuation)
+
+    cylinder_head head(
+        chamber_volume: chamber_volume,
+        intake_runner_volume: 120.0 * units.cc,
+        intake_runner_cross_section_area: 9.0 * units.cm2,
+        intake_port_flow: intake_flow,
+        exhaust_port_flow: exhaust_flow,
+        intake_camshaft: intake_camshaft,
+        exhaust_camshaft: exhaust_camshaft,
+        flip_display: flip_display
+    )
+}
+
+public node td16_camshaft_builder {
+    input intake_lobe_profile;
+    input exhaust_lobe_profile;
+    input intake_lobe_center: 112.0 * units.deg;
+    input exhaust_lobe_center: 112.0 * units.deg;
+    input advance: 0.0 * units.deg;
+    input base_radius: 0.6 * units.inch;
+
+    output intake_cam: _intake_cam;
+    output exhaust_cam: _exhaust_cam;
+
+    camshaft_parameters params(
+        advance: advance,
+        base_radius: base_radius
+    )
+
+    camshaft _intake_cam(params, lobe_profile: intake_lobe_profile)
+    camshaft _exhaust_cam(params, lobe_profile: exhaust_lobe_profile)
+
+    label rot(180 * units.deg)
+    label rot360(360 * units.deg)
+
+    // Firing order 1-3-4-2 -> firing slots per cylinder: 0, 3, 1, 2
+    _exhaust_cam
+        .add_lobe(rot360 - exhaust_lobe_center + 0 * rot)
+        .add_lobe(rot360 - exhaust_lobe_center + 3 * rot)
+        .add_lobe(rot360 - exhaust_lobe_center + 1 * rot)
+        .add_lobe(rot360 - exhaust_lobe_center + 2 * rot)
+
+    _intake_cam
+        .add_lobe(rot360 + intake_lobe_center + 0 * rot)
+        .add_lobe(rot360 + intake_lobe_center + 3 * rot)
+        .add_lobe(rot360 + intake_lobe_center + 1 * rot)
+        .add_lobe(rot360 + intake_lobe_center + 2 * rot)
+}
+
+public node i4_1_6_td {
+    alias output __out: engine;
+
+    engine engine(
+        name: "1.6 TD I4 [Diesel, Turbo]",
+        starter_torque: 180 * units.lb_ft,
+        starter_speed: 250 * units.rpm,
+        redline: 4600 * units.rpm,
+        fuel: diesel_fuel(),
+        throttle_gamma: 1.0,        // diesel pedal = fuel, keep linear
+        dyno_min_speed: 1000 * units.rpm,
+        dyno_max_speed: 4800 * units.rpm,
+        hf_gain: 0.035,        // high-frequency content = injector/combustion clatter
+        noise: 1.2,
+        jitter: 0.8,           // cycle-to-cycle roughness
+        simulation_frequency: 15000
+    )
+
+    wires wires()
+
+    label stroke(80.5 * units.mm)
+    label bore(79.5 * units.mm)
+    label rod_length(140.0 * units.mm)
+    label compression_height(34.0 * units.mm)
+
+    crankshaft c0(
+        throw: stroke / 2,
+        flywheel_mass: 9 * units.kg,   // dual-mass flywheel
+        mass: 14 * units.kg,
+        friction_torque: 14.0 * units.lb_ft, // diesels have high friction
+        moment_of_inertia: 0.22986844776863666 * 2.0, // higher = slower, heavier rev response
+        position_x: 0.0,
+        position_y: 0.0,
+        tdc: constants.pi / 2
+    )
+
+    rod_journal rj0(angle: 0.0 * units.deg)
+    rod_journal rj1(angle: 180.0 * units.deg)
+    rod_journal rj2(angle: 180.0 * units.deg)
+    rod_journal rj3(angle: 0.0 * units.deg)
+
+    c0
+        .add_rod_journal(rj0)
+        .add_rod_journal(rj1)
+        .add_rod_journal(rj2)
+        .add_rod_journal(rj3)
+
+    piston_parameters piston_params(
+        mass: 520 * units.g,   // heavy diesel piston
+        compression_height: compression_height,
+        wrist_pin_position: 0.0,
+        displacement: 0.0
+    )
+
+    connecting_rod_parameters cr_params(
+        mass: 600.0 * units.g,
+        moment_of_inertia: 0.0015884918028487504,
+        center_of_mass: 0.0,
+        length: rod_length
+    )
+
+    cylinder_bank_parameters bank_params(
+        bore: bore,
+        deck_height: stroke / 2 + rod_length + compression_height
+    )
+
+    intake intake(
+        plenum_volume: 3.5 * units.L,          // incl. intercooler piping
+        plenum_cross_section_area: 25.0 * units.cm2,
+        intake_flow_rate: k_carb(450.0),
+        runner_flow_rate: k_carb(200.0),
+        runner_length: 8.0 * units.inch,
+        idle_flow_rate: k_carb(0.0),
+        idle_throttle_plate_position: 0.9985,  // closer to 1.0 = lower idle
+        molecular_afr: 17.75,
+        velocity_decay: 0.5,
+
+        diesel: true,
+        diesel_idle_fuel: 0.0,
+        diesel_max_fuel: 0.55,
+        diesel_idle_rpm: 800 * units.rpm,     // idle governor target
+        diesel_governor_gain: 3.0,
+
+        // Injector clatter sample (taken from a real idling diesel recording)
+        injector_sound: impulse_response(
+            filename: "../../sound-library/diesel/injector_clack.wav",
+            volume: INJECTOR_CLATTER_VOLUME),
+
+        turbo: true,
+        turbo_max_boost: TURBO_BOOST,
+        turbo_spool_time: TURBO_SPOOL_TIME,
+        turbo_full_boost_rpm: TURBO_FULL_BOOST_RPM * units.rpm,
+        turbo_max_shaft_rpm: 190000,
+        whistle_volume: WHISTLE_VOLUME,
+        whistle_min_frequency: 1500,
+        whistle_max_frequency: 8500,
+        blow_off_valve: false
+    )
+
+    exhaust_system_parameters es_params(
+        outlet_flow_rate: k_carb(350.0),        // turbo + DPF restriction
+        primary_tube_length: 6.0 * units.inch,
+        primary_flow_rate: k_carb(150.0),
+        velocity_decay: 1.0,
+        volume: 60.0 * units.L
+    )
+
+    exhaust_system exhaust0(es_params, audio_volume: 1.0, impulse_response: ir_lib.mild_exhaust_0)
+
+    cylinder_bank b0(bank_params, angle: 0.0 * units.deg)
+    b0
+        .add_cylinder(
+            piston: piston(piston_params, blowby: k_28inH2O(0.1)),
+            connecting_rod: connecting_rod(cr_params),
+            rod_journal: rj0,
+            intake: intake,
+            exhaust_system: exhaust0,
+            ignition_wire: wires.wire1,
+            sound_attenuation: 1.0
+        )
+        .add_cylinder(
+            piston: piston(piston_params, blowby: k_28inH2O(0.12)),
+            connecting_rod: connecting_rod(cr_params),
+            rod_journal: rj1,
+            intake: intake,
+            exhaust_system: exhaust0,
+            ignition_wire: wires.wire2,
+            sound_attenuation: 0.9
+        )
+        .add_cylinder(
+            piston: piston(piston_params, blowby: k_28inH2O(0.1)),
+            connecting_rod: connecting_rod(cr_params),
+            rod_journal: rj2,
+            intake: intake,
+            exhaust_system: exhaust0,
+            ignition_wire: wires.wire3,
+            sound_attenuation: 1.05
+        )
+        .add_cylinder(
+            piston: piston(piston_params, blowby: k_28inH2O(0.14)),
+            connecting_rod: connecting_rod(cr_params),
+            rod_journal: rj3,
+            intake: intake,
+            exhaust_system: exhaust0,
+            ignition_wire: wires.wire4,
+            sound_attenuation: 0.95
+        )
+
+    engine.add_cylinder_bank(b0)
+    engine.add_crankshaft(c0)
+
+    harmonic_cam_lobe intake_lobe(
+        duration_at_50_thou: 205 * units.deg,
+        gamma: 1.0,
+        lift: 8.0 * units.mm,
+        steps: 100
+    )
+
+    harmonic_cam_lobe exhaust_lobe(
+        duration_at_50_thou: 200 * units.deg,
+        gamma: 1.0,
+        lift: 8.0 * units.mm,
+        steps: 100
+    )
+
+    td16_camshaft_builder camshaft(
+        intake_lobe_profile: intake_lobe,
+        exhaust_lobe_profile: exhaust_lobe
+    )
+
+    b0.set_cylinder_head(
+        td16_head(
+            intake_camshaft: camshaft.intake_cam,
+            exhaust_camshaft: camshaft.exhaust_cam
+        )
+    )
+
+    // "Injection timing": diesels burn close to TDC
+    function timing_curve(1000 * units.rpm)
+    timing_curve
+        .add_sample(0000 * units.rpm, 6 * units.deg)
+        .add_sample(1000 * units.rpm, 8 * units.deg)
+        .add_sample(2000 * units.rpm, 12 * units.deg)
+        .add_sample(3000 * units.rpm, 15 * units.deg)
+        .add_sample(4000 * units.rpm, 18 * units.deg)
+        .add_sample(5000 * units.rpm, 20 * units.deg)
+
+    ignition_module ignition_module(
+        timing_curve: timing_curve,
+        rev_limit: 5000 * units.rpm,
+        limiter_duration: 0.1
+    )
+    ignition_module
+        .connect_wire(wires.wire1, (0.0 / 4.0) * cycle)
+        .connect_wire(wires.wire3, (1.0 / 4.0) * cycle)
+        .connect_wire(wires.wire4, (2.0 / 4.0) * cycle)
+        .connect_wire(wires.wire2, (3.0 / 4.0) * cycle)
+
+    engine.add_ignition_module(ignition_module)
+}
+
+public node td16_car {
+    alias output __out:
+        vehicle(
+            mass: 1300 * units.kg,
+            drag_coefficient: 0.31,
+            cross_sectional_area: (1790 * units.mm) * (1450 * units.mm),
+            diff_ratio: 3.39,
+            tire_radius: 316 * units.mm,
+            rolling_resistance: 250 * units.N
+        );
+}
+
+public node td16_transmission {
+    alias output __out: t;
+
+    transmission t(
+        max_clutch_torque: 350 * units.lb_ft
+    )
+    t
+        .add_gear(3.78)
+        .add_gear(2.12)
+        .add_gear(1.27)
+        .add_gear(0.87)
+        .add_gear(0.66)
+}
+
+public node main {
+    set_engine(i4_1_6_td())
+    set_vehicle(td16_car())
+    set_transmission(td16_transmission())
+}
+
+main()

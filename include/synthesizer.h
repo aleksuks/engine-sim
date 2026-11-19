@@ -39,6 +39,14 @@ class Synthesizer {
             AudioParameters initialAudioParameters;
         };
 
+        struct TurboAudio {
+            float whistleFrequency = 0.0f;
+            float whistleAmplitude = 0.0f;
+            float hissAmplitude = 0.0f;
+            float blowOffAmplitude = 0.0f;
+            float flutterAmplitude = 0.0f;
+        };
+
         struct InputChannel {
             RingBuffer<float> data;
             float *transferBuffer = nullptr;
@@ -88,6 +96,15 @@ class Synthesizer {
 
         int16_t renderAudio(int inputOffset);
 
+        void setTurboAudio(const TurboAudio &audio);
+
+        // Diesel injector clatter: a short recorded sample retriggered on every
+        // injection, aligned to the simulation timeline
+        void initializeClackSample(const int16_t *samples, unsigned int count, float volume);
+        void triggerClack(float amplitude);
+        float renderClack(float trigger);
+        float renderTurbo();
+
         double getLevelerGain();
         AudioParameters getAudioParameters();
         void setAudioParameters(const AudioParameters &params);
@@ -119,6 +136,44 @@ class Synthesizer {
         std::condition_variable m_cv0;
 
         ProcessingFilters *m_filters;
+
+        // Turbo sound (written by the simulation thread, read by audio thread)
+        std::atomic<float> m_turboWhistleFrequency;
+        std::atomic<float> m_turboWhistleAmplitude;
+        std::atomic<float> m_turboHissAmplitude;
+        std::atomic<float> m_turboBlowOffAmplitude;
+        std::atomic<float> m_turboFlutterAmplitude;
+
+        // Turbo DSP state (audio thread only)
+        double m_whistlePhase;
+        double m_flutterPhase;
+        double m_vibratoPhase;
+        float m_smoothWhistleFrequency;
+        float m_smoothWhistleAmplitude;
+        float m_smoothHissAmplitude;
+        float m_smoothBlowOffAmplitude;
+        float m_smoothFlutterAmplitude;
+        float m_hissLp;
+        float m_hissHp;
+        float m_bovLp;
+        float m_bovHp;
+        float m_flutterLp;
+        uint32_t m_noiseState;
+
+        // Injector clatter
+        static constexpr int ClackVoices = 8;
+        struct ClackVoice {
+            double position = -1.0;
+            double rate = 1.0;
+            float amplitude = 0.0f;
+        };
+        float *m_clackSample;
+        unsigned int m_clackSampleLength;
+        float m_clackVolume;
+        float m_pendingClack;
+        RingBuffer<float> m_clackTriggerData;
+        float *m_clackTriggerTransfer;
+        ClackVoice m_clackVoices[ClackVoices];
 };
 
 #endif /* ATG_ENGINE_SIM_ENGINE_SYNTHESIZER_H */

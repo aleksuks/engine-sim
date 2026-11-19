@@ -318,6 +318,20 @@ void PistonEngineSimulator::simulateStep_() {
     }
 
     im->resetIgnitionEvents();
+
+    // Turbochargers: reference flow is the NA air flow at full-boost rpm
+    for (int j = 0; j < intakeCount; ++j) {
+        Intake *intake = m_engine->getIntake(j);
+        const double fullBoostRevsPerSecond =
+            intake->getTurboFullBoostRpm() / (2 * constants::pi);
+        const double airDensity =
+            units::pressure(1.0, units::atm) / (constants::R * units::celcius(25.0));
+        const double referenceAirFlow =
+            0.9 * 0.5 * (m_engine->getDisplacement() / intakeCount)
+            * fullBoostRevsPerSecond * airDensity;
+        intake->setEngineSpeed(m_engine->getSpeed());
+        intake->updateTurbo(timestep, referenceAirFlow);
+    }
 }
 
 double PistonEngineSimulator::getTotalExhaustFlow() const {
@@ -410,4 +424,29 @@ void PistonEngineSimulator::writeToSynthesizer() {
     }
 
     synthesizer().writeInput(m_exhaustFlowStagingBuffer);
+
+    Synthesizer::TurboAudio turboAudio;
+    for (int j = 0; j < m_engine->getIntakeCount(); ++j) {
+        const Intake::TurboSoundState s = m_engine->getIntake(j)->getTurboSoundState();
+        if (s.whistleFrequency > turboAudio.whistleFrequency) {
+            turboAudio.whistleFrequency = s.whistleFrequency;
+        }
+
+        turboAudio.whistleAmplitude += s.whistleAmplitude;
+        turboAudio.hissAmplitude += s.hissAmplitude;
+        turboAudio.blowOffAmplitude += s.blowOffAmplitude;
+        turboAudio.flutterAmplitude += s.flutterAmplitude;
+    }
+    synthesizer().setTurboAudio(turboAudio);
+
+    for (int i = 0; i < cylinderCount; ++i) {
+        CombustionChamber *chamber = m_engine->getChamber(i);
+        if (chamber->m_knockEvent > 0) {
+            CylinderHead *head = chamber->getCylinderHead();
+            const double attenuation =
+                head->getSoundAttenuation(chamber->getPiston()->getCylinderIndex());
+            synthesizer().triggerClack(static_cast<float>(chamber->m_knockEvent * attenuation));
+            chamber->m_knockEvent = 0;
+        }
+    }
 }

@@ -319,3 +319,22 @@ target_link_libraries(engine-sim-test
 
 include(GoogleTest)
 gtest_discover_tests(engine-sim-test)
+
+# Headless test runner (no GUI): engine-sim-headless <script.mr> [out.wav] [hold_rpm]
+if (PIRANHA_ENABLED)
+    add_executable(engine-sim-headless tools/headless_test.cpp)
+    target_link_libraries(engine-sim-headless
+        engine-sim
+        engine-sim-script-interpreter)
+    target_include_directories(engine-sim-headless
+        PUBLIC dependencies/submodules)
+endif (PIRANHA_ENABLED)
+
+# The renderer uses D3D11; the D3D10 (debug D3DX) and Vulkan backends are never
+# created, so don't require their DLLs at startup.
+if (MSVC)
+    target_link_options(engine-sim-app PRIVATE
+        "/DELAYLOAD:d3dx10d_43.dll"
+        "/DELAYLOAD:vulkan-1.dll")
+    target_link_libraries(engine-sim-app delayimp)
+endif (MSVC)

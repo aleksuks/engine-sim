@@ -32,6 +32,9 @@ void Fuel::initialize(const Parameters &params) {
     m_maxDilutionEffect = params.maxDilutionEffect;
     m_maxTurbulenceEffect = params.maxTurbulenceEffect;
     m_lowEfficiencyAttenuation = params.lowEfficiencyAttenuation;
+    m_maxLambda = params.maxLambda;
+    m_compressionIgnition = params.compressionIgnition;
+    m_autoignitionTemperature = params.autoignitionTemperature;
 }
 
 double Fuel::flameSpeed(

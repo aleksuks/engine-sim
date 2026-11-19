@@ -19,6 +19,7 @@ CombustionChamber::CombustionChamber() {
     m_pistonSpeed = nullptr;
     m_pressure = nullptr;
     m_lit = false;
+    m_knockEvent = 0;
     m_litLastFrame = false;
     m_peakTemperature = 0;
 
@@ -168,12 +169,33 @@ bool CombustionChamber::popLitLastFrame() {
 
 void CombustionChamber::ignite() {
     if (!m_lit) {
+        // Diesel direct injection: the injector sprays fuel straight into the
+        // cylinder at the injection event; quantity follows the pedal
+        Intake *intake = m_head->getIntake(m_piston->getCylinderIndex());
+        if (intake != nullptr && intake->isDiesel()) {
+            GasSystem::Mix mix = m_system.mix();
+            const double injected =
+                mix.p_o2 * intake->getFuelingFraction() / m_fuel->getMolecularAfr();
+            mix.p_fuel += injected;
+            mix.p_inert = std::fmax(mix.p_inert - injected, 0.0);
+            m_system.changeMix(mix);
+            intake->m_totalFuelInjected += injected * m_system.n();
+        }
+
         if (m_system.mix().p_fuel == 0) return;
 
         const double afr = m_system.mix().p_o2 / m_system.mix().p_fuel;
         const double equivalenceRatio = afr / m_fuel->getMolecularAfr();
         if (equivalenceRatio < 0.5) return;
-        else if (equivalenceRatio > 1.9) return;
+        else if (equivalenceRatio > m_fuel->getMaxLambda()) return;
+
+        // Compression ignition: the injected fuel only lights off if the
+        // air has been squeezed hot enough
+        if (m_fuel->isCompressionIgnition()
+            && m_system.temperature() < m_fuel->getAutoignitionTemperature())
+        {
+            return;
+        }
 
         const double idealInert = m_system.mix().p_o2 / 0.7;
         const double dilution = (m_system.mix().p_inert / idealInert) - 1;
@@ -186,6 +208,11 @@ void CombustionChamber::ignite() {
         m_flameEvent.percentageLit = 0;
         m_flameEvent.globalMix = m_system.mix();
         m_lit = true;
+
+        if (intake != nullptr && intake->isDiesel()) {
+            // Diesel knock is harshest at light load (long ignition delay)
+            m_knockEvent = 1.0 - 0.45 * intake->getPedal();
+        }
         m_litLastFrame = true;
 
         const double randomness =
@@ -213,9 +240,14 @@ void CombustionChamber::ignite() {
             (mixingFactor * rand_s + (1 - mixingFactor));
         m_flameEvent.efficiency =
             efficiencyAttenuation * maxBurningEfficiency;
+        // Diesel burns as a diffusion flame around the fuel spray, which is
+        // locally near-stoichiometric even when the overall charge is lean
+        const double flameAfr = m_fuel->isCompressionIgnition()
+            ? std::fmin(afr, 1.1 * m_fuel->getMolecularAfr())
+            : afr;
         m_flameEvent.flameSpeed = m_fuel->flameSpeed(
             turbulence,
-            afr,
+            flameAfr,
             m_system.temperature(),
             m_system.pressure(),
             calculateFiringPressure(),

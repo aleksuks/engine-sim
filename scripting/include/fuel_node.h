@@ -42,6 +42,9 @@ namespace es_script {
             addInput("low_efficiency_attenuation", &m_parameters.lowEfficiencyAttenuation);
             addInput("max_turbulence_effect", &m_parameters.maxTurbulenceEffect);
             addInput("max_dilution_effect", &m_parameters.maxDilutionEffect);
+            addInput("max_lambda", &m_parameters.maxLambda);
+            addInput("compression_ignition", &m_parameters.compressionIgnition);
+            addInput("autoignition_temperature", &m_parameters.autoignitionTemperature);
 
             ObjectReferenceNode<FuelNode>::registerInputs();
         }

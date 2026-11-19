@@ -302,6 +302,26 @@ void Engine::update(double dt) {
     m_throttle->update(dt, this);
 }
 
+double Engine::getMaxTurboBoost() const {
+    double maxBoost = 0.0;
+    for (int i = 0; i < m_intakeCount; ++i) {
+        if (m_intakes[i].getTurboMaxBoost() > maxBoost) {
+            maxBoost = m_intakes[i].getTurboMaxBoost();
+        }
+    }
+
+    return maxBoost;
+}
+
+double Engine::getBoostPressure() const {
+    double boost = 0.0;
+    for (int i = 0; i < m_intakeCount; ++i) {
+        boost += m_intakes[i].getBoostPressure();
+    }
+
+    return (m_intakeCount > 0) ? boost / m_intakeCount : 0.0;
+}
+
 double Engine::getManifoldPressure() const {
     double pressureSum = 0.0;
     for (int i = 0; i < m_intakeCount; ++i) {

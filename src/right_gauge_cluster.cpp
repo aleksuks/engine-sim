@@ -187,6 +187,14 @@ void RightGaugeCluster::render() {
 
 void RightGaugeCluster::setEngine(Engine *engine) {
     m_engine = engine;
+    setUnits();
+}
+
+double RightGaugeCluster::getBoostCeiling() const {
+    // Naturally aspirated engines never read above atmospheric
+    return (m_engine != nullptr)
+        ? m_engine->getMaxTurboBoost() * 1.2
+        : 0.0;
 }
 
 void RightGaugeCluster::renderTachSpeedCluster(const Bounds &bounds) {
@@ -250,7 +258,7 @@ void RightGaugeCluster::renderFuelAirCluster(const Bounds &bounds) {
         m_manifoldVacuumGauge->m_gauge->m_value = static_cast<float>(vacuumReading);
     }
     else {
-        m_manifoldVacuumGauge->m_gauge->m_value = (vacuumReading > -0.5)
+        m_manifoldVacuumGauge->m_gauge->m_value = (vacuumReading > -0.5 && vacuumReading < 0.5)
             ? 0.0f
             : static_cast<float>(vacuumReading);
     }
@@ -280,7 +288,7 @@ void RightGaugeCluster::renderFuelAirCluster(const Bounds &bounds) {
 
 double RightGaugeCluster::getManifoldPressureWithUnits(double ambientPressure) {
     if (m_pressureUnits == "inHg") {
-        return units::convert(std::fmin(getManifoldPressure() - ambientPressure, 0.0), units::inHg);
+        return units::convert(std::fmin(getManifoldPressure() - ambientPressure, getBoostCeiling()), units::inHg);
     }
     else if (m_pressureUnits == "kPa") {
         return units::convert(getManifoldPressure(), units::kPa);
@@ -292,10 +300,10 @@ double RightGaugeCluster::getManifoldPressureWithUnits(double ambientPressure) {
         return units::convert(getManifoldPressure(), units::bar);
     }
     else if (m_pressureUnits == "psi") {
-        return units::convert(std::fmin(getManifoldPressure() - ambientPressure, 0.0), units::psi);
+        return units::convert(std::fmin(getManifoldPressure() - ambientPressure, getBoostCeiling()), units::psi);
     }
     else {
-        return units::convert(std::fmin(getManifoldPressure() - ambientPressure, 0.0), units::inHg);
+        return units::convert(std::fmin(getManifoldPressure() - ambientPressure, getBoostCeiling()), units::inHg);
     }
 }
 
@@ -427,5 +435,21 @@ void RightGaugeCluster::setUnits() {
             { m_app->getBlue(), -22, -10, 3.0f, 6.0f, shortenAngle, shortenAngle }, 3);
         m_manifoldVacuumGauge->m_gauge->setBand(
             { m_app->getForegroundColor(), -30, -22, 3.0f, 6.0f, shortenAngle, shortenAngle }, 4);
+    }
+
+    const double boost = (m_engine != nullptr) ? m_engine->getMaxTurboBoost() : 0.0;
+    if (boost > 0) {
+        double boostInUnits;
+        if (m_pressureUnits == "kPa") boostInUnits = units::convert(boost, units::kPa);
+        else if (m_pressureUnits == "mbar") boostInUnits = units::convert(boost, units::mbar);
+        else if (m_pressureUnits == "bar") boostInUnits = units::convert(boost, units::bar);
+        else if (m_pressureUnits == "psi") boostInUnits = units::convert(boost, units::psi);
+        else boostInUnits = units::convert(boost, units::inHg);
+
+        m_manifoldVacuumGauge->m_title = "BOOST / VACUUM";
+        m_manifoldVacuumGauge->m_gauge->m_max += static_cast<float>(std::ceil(boostInUnits * 1.2));
+    }
+    else {
+        m_manifoldVacuumGauge->m_title = "MANIFOLD PRESSURE";
     }
 }

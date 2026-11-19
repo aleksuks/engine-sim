@@ -63,6 +63,8 @@ class Engine : public Part {
         virtual double getThrottlePlateAngle() const;
         virtual void calculateDisplacement();
         double getDisplacement() const { return m_displacement; }
+        double getMaxTurboBoost() const;
+        double getBoostPressure() const;
         virtual double getIntakeFlowRate() const;
         virtual void update(double dt);
 

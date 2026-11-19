@@ -12,4 +12,5 @@
 	url = https://github.com/ange-yaghi/csv-io
 [submodule "dependencies/submodules/piranha"]
 	path = dependencies/submodules/piranha
-	url = https://github.com/ange-yaghi/piranha.git
+	url = https://github.com/aleksuks/piranha.git
+	branch = boost-1.85-fix

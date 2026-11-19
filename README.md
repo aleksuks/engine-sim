@@ -234,3 +234,16 @@ This project was made possible by the generous donations of the following indivi
 |Jeff Testa|Avery Snyder|Josh Kern|Triptagram|Bayon Antoine|
 |Iván Juárez Núñez|Amery Martinat|ElArGee|Cory Green|lucas Di lorenzo|
 |Caleb Sandersier|||||
+
+## Diesel + turbo fork (this branch)
+
+This fork adds:
+
+- **Diesel / compression ignition** – direct injection at the injection event, autoignition temperature check, unthrottled intake (pedal = fuel quantity) and an idle governor. Fuel options: `max_lambda`, `compression_ignition`, `autoignition_temperature`. Intake options: `diesel`, `diesel_idle_fuel`, `diesel_max_fuel`, `diesel_idle_rpm`, `diesel_governor_gain`, `injector_sound`.
+- **Turbocharger** – shaft spool lag, wastegate-limited boost, blow-off valve or compressor surge on lift-off, boost on the manifold gauge. Intake options: `turbo`, `turbo_max_boost`, `turbo_spool_time`, `turbo_full_boost_rpm`, `turbo_max_shaft_rpm`, `blow_off_valve`, `whistle_volume`, `whistle_min_frequency`, `whistle_max_frequency`, `blow_off_volume`.
+- **Sound** – turbo whistle + intake hiss, BOV "pssh" / surge flutter, and a sampled injector clatter retriggered on every injection.
+- Example engine: `assets/engines/diesel/i4_1_6_td.mr` (1.6 TD I4).
+- Extra throttle keys: **O** = 50 %, **P** = 75 %.
+- `engine-sim-headless` – runs a script without the GUI, prints rpm/boost/torque and writes a WAV: `engine-sim-headless <script.mr> [out.wav] [hold_rpm]` (run from `build/`).
+
+Build notes (Windows, VS 2022 + vcpkg): `cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake -DDISCORD_ENABLED=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5` with `sdl2 sdl2-image boost-filesystem` from vcpkg and win_flex_bison on PATH. Ship the VC++ runtime that matches your compiler and install the DirectX End-User Runtime (for `d3dx11_43.dll`).

@@ -26,6 +26,33 @@ Synthesizer::Synthesizer() {
     m_run = true;
     m_thread = nullptr;
     m_filters = nullptr;
+
+    m_turboWhistleFrequency = 0.0f;
+    m_turboWhistleAmplitude = 0.0f;
+    m_turboHissAmplitude = 0.0f;
+    m_turboBlowOffAmplitude = 0.0f;
+    m_turboFlutterAmplitude = 0.0f;
+
+    m_whistlePhase = 0.0;
+    m_flutterPhase = 0.0;
+    m_vibratoPhase = 0.0;
+    m_smoothWhistleFrequency = 0.0f;
+    m_smoothWhistleAmplitude = 0.0f;
+    m_smoothHissAmplitude = 0.0f;
+    m_smoothBlowOffAmplitude = 0.0f;
+    m_smoothFlutterAmplitude = 0.0f;
+    m_hissLp = 0.0f;
+    m_hissHp = 0.0f;
+    m_bovLp = 0.0f;
+    m_bovHp = 0.0f;
+    m_flutterLp = 0.0f;
+    m_noiseState = 0x12345678u;
+
+    m_clackSample = nullptr;
+    m_clackSampleLength = 0;
+    m_clackVolume = 0.0f;
+    m_pendingClack = 0.0f;
+    m_clackTriggerTransfer = nullptr;
 }
 
 Synthesizer::~Synthesizer() {
@@ -54,6 +81,9 @@ void Synthesizer::initialize(const Parameters &p) {
         m_inputChannels[i].transferBuffer = new float[p.inputBufferSize];
         m_inputChannels[i].data.initialize(p.inputBufferSize);
     }
+
+    m_clackTriggerData.initialize(p.inputBufferSize);
+    m_clackTriggerTransfer = new float[p.inputBufferSize];
 
     m_filters = new ProcessingFilters[p.inputChannelCount];
     for (int i = 0; i < p.inputChannelCount; ++i) {
@@ -132,6 +162,13 @@ void Synthesizer::destroy() {
     delete[] m_inputChannels;
     delete[] m_filters;
 
+    m_clackTriggerData.destroy();
+    delete[] m_clackTriggerTransfer;
+    delete[] m_clackSample;
+    m_clackTriggerTransfer = nullptr;
+    m_clackSample = nullptr;
+    m_clackSampleLength = 0;
+
     m_inputChannels = nullptr;
     m_filters = nullptr;
 
@@ -191,6 +228,21 @@ void Synthesizer::writeInput(const double *data) {
         m_inputChannels[i].lastInputSample = data[i];
     }
 
+    {
+        const size_t baseIndex = m_clackTriggerData.writeIndex();
+        const double distance =
+            inputDistance(m_inputWriteOffset, m_lastInputSampleOffset);
+        double s = inputDistance(baseIndex, m_lastInputSampleOffset);
+        bool written = false;
+        for (; s <= distance; s += 1.0) {
+            if (s >= m_inputBufferSize) s -= m_inputBufferSize;
+            m_clackTriggerData.write(written ? 0.0f : m_pendingClack);
+            written = true;
+        }
+
+        if (written) m_pendingClack = 0.0f;
+    }
+
     m_lastInputSampleOffset = m_inputWriteOffset;
 }
 
@@ -200,6 +252,7 @@ void Synthesizer::endInputBlock() {
     for (int i = 0; i < m_inputChannelCount; ++i) {
         m_inputChannels[i].data.removeBeginning(m_inputSamplesRead);
     }
+    m_clackTriggerData.removeBeginning(m_inputSamplesRead);
 
     if (m_inputChannelCount != 0) {
         m_latency = m_inputChannels[0].data.size();
@@ -236,6 +289,7 @@ void Synthesizer::renderAudio() {
     for (int i = 0; i < m_inputChannelCount; ++i) {
         m_inputChannels[i].data.read(n, m_inputChannels[i].transferBuffer);
     }
+    m_clackTriggerData.read(n, m_clackTriggerTransfer);
     
     m_inputSamplesRead = n;
     m_processed = true;
@@ -318,7 +372,11 @@ int16_t Synthesizer::renderAudio(int inputSample) {
     signal = m_antialiasing.fast_f(signal);
 
     m_levelingFilter.p_target = m_audioParameters.levelerTarget;
-    const float v_leveled = m_levelingFilter.f(signal) * m_audioParameters.volume;
+    const float v_leveled =
+        (m_levelingFilter.f(signal)
+            + renderTurbo()
+            + renderClack(m_clackTriggerTransfer[inputSample]))
+        * m_audioParameters.volume;
     int r_int = std::lround(v_leveled);
     if (r_int > INT16_MAX) {
         r_int = INT16_MAX;
@@ -328,6 +386,164 @@ int16_t Synthesizer::renderAudio(int inputSample) {
     }
 
     return static_cast<int16_t>(r_int);
+}
+
+void Synthesizer::initializeClackSample(
+    const int16_t *samples,
+    unsigned int count,
+    float volume)
+{
+    delete[] m_clackSample;
+    m_clackSample = nullptr;
+    m_clackSampleLength = 0;
+
+    if (samples == nullptr || count == 0 || volume <= 0) return;
+
+    m_clackSample = new float[count];
+    for (unsigned int i = 0; i < count; ++i) {
+        m_clackSample[i] = samples[i] / (float)INT16_MAX;
+    }
+
+    m_clackSampleLength = count;
+    m_clackVolume = volume;
+}
+
+void Synthesizer::triggerClack(float amplitude) {
+    if (m_clackSampleLength == 0) return;
+    if (amplitude > m_pendingClack) m_pendingClack = amplitude;
+}
+
+float Synthesizer::renderClack(float trigger) {
+    if (m_clackSampleLength == 0) return 0.0f;
+
+    if (trigger > 0) {
+        // Start a new voice (steal the oldest if all are busy)
+        int slot = 0;
+        double oldest = -1.0;
+        for (int i = 0; i < ClackVoices; ++i) {
+            if (m_clackVoices[i].position < 0) { slot = i; oldest = -2.0; break; }
+            if (m_clackVoices[i].position > oldest) { oldest = m_clackVoices[i].position; slot = i; }
+        }
+
+        // Small per-hit pitch and level variation so it doesn't sound looped
+        m_noiseState ^= m_noiseState << 13;
+        m_noiseState ^= m_noiseState >> 17;
+        m_noiseState ^= m_noiseState << 5;
+        const double r0 = (double)m_noiseState / 4294967295.0;
+        m_noiseState ^= m_noiseState << 13;
+        m_noiseState ^= m_noiseState >> 17;
+        m_noiseState ^= m_noiseState << 5;
+        const double r1 = (double)m_noiseState / 4294967295.0;
+
+        m_clackVoices[slot].position = 0.0;
+        m_clackVoices[slot].rate = 0.94 + 0.12 * r0;
+        m_clackVoices[slot].amplitude = trigger * (float)(0.75 + 0.25 * r1);
+    }
+
+    float out = 0.0f;
+    for (int i = 0; i < ClackVoices; ++i) {
+        ClackVoice &v = m_clackVoices[i];
+        if (v.position < 0) continue;
+
+        const unsigned int i0 = (unsigned int)v.position;
+        if (i0 + 1 >= m_clackSampleLength) {
+            v.position = -1.0;
+            continue;
+        }
+
+        const float f = (float)(v.position - i0);
+        out += v.amplitude * (m_clackSample[i0] * (1 - f) + m_clackSample[i0 + 1] * f);
+        v.position += v.rate;
+    }
+
+    return 9000.0f * m_clackVolume * out;
+}
+
+void Synthesizer::setTurboAudio(const TurboAudio &audio) {
+    m_turboWhistleFrequency = audio.whistleFrequency;
+    m_turboWhistleAmplitude = audio.whistleAmplitude;
+    m_turboHissAmplitude = audio.hissAmplitude;
+    m_turboBlowOffAmplitude = audio.blowOffAmplitude;
+    m_turboFlutterAmplitude = audio.flutterAmplitude;
+}
+
+float Synthesizer::renderTurbo() {
+    constexpr double TwoPi = 6.283185307179586;
+    const float sampleRate = m_audioSampleRate;
+
+    const float targetFrequency = m_turboWhistleFrequency.load(std::memory_order_relaxed);
+    const float targetWhistle = m_turboWhistleAmplitude.load(std::memory_order_relaxed);
+    const float targetHiss = m_turboHissAmplitude.load(std::memory_order_relaxed);
+    const float targetBlowOff = m_turboBlowOffAmplitude.load(std::memory_order_relaxed);
+    const float targetFlutter = m_turboFlutterAmplitude.load(std::memory_order_relaxed);
+
+    if (targetWhistle <= 0 && targetHiss <= 0 && targetBlowOff <= 0 && targetFlutter <= 0
+        && m_smoothWhistleAmplitude < 1E-4f && m_smoothHissAmplitude < 1E-4f
+        && m_smoothBlowOffAmplitude < 1E-4f && m_smoothFlutterAmplitude < 1E-4f)
+    {
+        return 0.0f;
+    }
+
+    // Parameter smoothing (~15 ms) so the sim's frame-rate updates don't zipper
+    const float k = 1.0f - std::exp(-1.0f / (0.015f * sampleRate));
+    if (m_smoothWhistleFrequency <= 0) m_smoothWhistleFrequency = targetFrequency;
+    m_smoothWhistleFrequency += (targetFrequency - m_smoothWhistleFrequency) * k;
+    m_smoothWhistleAmplitude += (targetWhistle - m_smoothWhistleAmplitude) * k;
+    m_smoothHissAmplitude += (targetHiss - m_smoothHissAmplitude) * k;
+    m_smoothBlowOffAmplitude += (targetBlowOff - m_smoothBlowOffAmplitude) * (k * 4.0f);
+    m_smoothFlutterAmplitude += (targetFlutter - m_smoothFlutterAmplitude) * (k * 4.0f);
+
+    // White noise (xorshift)
+    auto noise = [this]() {
+        m_noiseState ^= m_noiseState << 13;
+        m_noiseState ^= m_noiseState >> 17;
+        m_noiseState ^= m_noiseState << 5;
+        return (float)((double)m_noiseState / 4294967295.0 * 2.0 - 1.0);
+    };
+
+    // Whistle: compressor tone with a little wobble and a second harmonic
+    m_vibratoPhase += TwoPi * 6.5 / sampleRate;
+    if (m_vibratoPhase > TwoPi) m_vibratoPhase -= TwoPi;
+    const double frequency =
+        m_smoothWhistleFrequency * (1.0 + 0.004 * std::sin(m_vibratoPhase));
+    m_whistlePhase += TwoPi * frequency / sampleRate;
+    if (m_whistlePhase > TwoPi) m_whistlePhase -= TwoPi;
+    const float whistle =
+        (float)(std::sin(m_whistlePhase)
+            + 0.22 * std::sin(2.0 * m_whistlePhase + 0.7)
+            + 0.08 * std::sin(3.0 * m_whistlePhase + 1.3));
+
+    // Intake hiss: band-passed noise around the whistle
+    const float n0 = noise();
+    const float hissLpK = 1.0f - std::exp(-(float)TwoPi * 6000.0f / sampleRate);
+    const float hissHpK = 1.0f - std::exp(-(float)TwoPi * 1500.0f / sampleRate);
+    m_hissLp += (n0 - m_hissLp) * hissLpK;
+    m_hissHp += (m_hissLp - m_hissHp) * hissHpK;
+    const float hiss = m_hissLp - m_hissHp;
+
+    // Blow-off valve: bright "pssh" burst
+    const float n1 = noise();
+    const float bovLpK = 1.0f - std::exp(-(float)TwoPi * 9000.0f / sampleRate);
+    const float bovHpK = 1.0f - std::exp(-(float)TwoPi * 1800.0f / sampleRate);
+    m_bovLp += (n1 - m_bovLp) * bovLpK;
+    m_bovHp += (m_bovLp - m_bovHp) * bovHpK;
+    const float bov = m_bovLp - m_bovHp;
+
+    // Compressor surge: chopped low-mid noise ("stu-tu-tu")
+    const float n2 = noise();
+    const float flutterLpK = 1.0f - std::exp(-(float)TwoPi * 1400.0f / sampleRate);
+    m_flutterLp += (n2 - m_flutterLp) * flutterLpK;
+    const double flutterRate = 14.0 + 10.0 * m_smoothFlutterAmplitude;
+    m_flutterPhase += TwoPi * flutterRate / sampleRate;
+    if (m_flutterPhase > TwoPi) m_flutterPhase -= TwoPi;
+    const float chop = (float)std::pow(0.5 + 0.5 * std::sin(m_flutterPhase), 6.0);
+    const float flutter = m_flutterLp * chop;
+
+    return
+        2200.0f * m_smoothWhistleAmplitude * whistle
+        + 2600.0f * m_smoothHissAmplitude * hiss
+        + 9000.0f * m_smoothBlowOffAmplitude * bov
+        + 12000.0f * m_smoothFlutterAmplitude * flutter;
 }
 
 double Synthesizer::getLevelerGain() {
